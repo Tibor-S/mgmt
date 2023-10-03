@@ -7,6 +7,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
+use github::repos;
 use project::{Project, Projects};
 use tauri::async_runtime::block_on;
 use uuid::Uuid;
@@ -36,6 +37,8 @@ pub enum Error {
     PathParseError,
     #[error("Invalid path")]
     InvalidPathError,
+    #[error("Error occured while listing remote commits")]
+    RemoteCommitsError,
 }
 
 #[tauri::command]
@@ -78,6 +81,7 @@ fn update_projects(
         }
     };
     let projects = &mut *projects_state.0.lock().unwrap();
+
     projects.clear();
     projects.extend(new_projects.into_iter());
     Ok(())
@@ -140,6 +144,54 @@ fn project_local_commits(
     Ok(prj.and_then(|p| p.local_commits()))
 }
 
+#[tauri::command]
+fn branch_relation(
+    token_state: tauri::State<TokenState>,
+    projects_state: tauri::State<ProjectsState>,
+    id: String,
+    branch: String,
+    current: String,
+) -> Result<repos::Relation, Error> {
+    log::info!("branch_relation");
+    log::info!("id: {}", id);
+    log::info!("branch: {}", branch);
+    log::info!("current: {}", current);
+    let key = Uuid::try_parse(&id).map_err(|e| {
+        log::error!("{:?}", e);
+        Error::UuidParseError
+    })?;
+    let prj;
+    {
+        let projects = projects_state.0.lock().unwrap();
+        prj = projects.get(&key).ok_or(Error::UuidNoMatch)?.clone();
+    }
+    let repository = match prj.remote.clone() {
+        Some(r) => r,
+        None => return Ok(repos::Relation::Null),
+    };
+    let thread_token = token_state.0.clone();
+    let token_guard = thread_token.lock().unwrap();
+    let token = match &*token_guard {
+        Some(t) => t,
+        None => return Err(Error::NoTokenError),
+    };
+
+    let task = match block_on(repos::remote_branch_relation(
+        token,
+        &repository,
+        &*branch,
+        &current,
+    )) {
+        Ok(c) => c,
+        Err(e) => {
+            log::error!("{:?}", e);
+            return Err(Error::RemoteCommitsError);
+        }
+    };
+
+    Ok(task)
+}
+
 fn main() {
     env_logger::init();
     dotenv::dotenv().ok();
@@ -163,7 +215,8 @@ fn main() {
             project_ids,
             project_remote_name,
             project_local_name,
-            project_local_commits
+            project_local_commits,
+            branch_relation,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

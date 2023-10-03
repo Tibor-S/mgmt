@@ -13,8 +13,7 @@ function App() {
   }).catch((err) => console.error(err));
   return (
     <>
-      <div>
-        <div>{ids().length}</div>
+      <div class='container'>
         <For each={ids()}>{(id) => <ProjectCard id={id} />}</For>
       </div>
     </>

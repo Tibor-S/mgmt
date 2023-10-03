@@ -16,23 +16,41 @@ export default (props: {
   </div>
 }
 
+type Relation = "Ahead" | "Behind" | "Same" | "Null"
 const RemoteEl = (props: {
   id: string,
 }) => {
 
   const {id} = props;
-  const [commits, setLocalCommits] = createSignal<{[b: string]: string}>({});
+  const [current, setCurrent] = createSignal<{[b: string]: string}>({});
+  const [relations, setRelations] = createSignal<{[b: string]: Relation}>({});
 
   onMount(() => {
     invoke<{[b: string]: string}>("project_local_commits", {id: id})
-      .then((res) => setLocalCommits(res))
+      .then((current) => {
+        setCurrent(current)
+      })
       .catch((err) => console.log(err));
   })
+
+  createEffect(() => {
+    const c = current();
+    if (c === null) return;
+    const nrelations: {[b: string]: Relation} = {};
+    let promises = [];
+    for (const [branch, cc] of Object.entries(c)) {
+      promises.push(
+      invoke<Relation>("branch_relation", {id: id, branch: branch, current: cc})
+        .then((rel) => nrelations[branch] = rel)
+        .catch((err) => console.log(err)));
+    }
+    Promise.all(promises).then(() => setRelations(nrelations));
+  }, [current])
+
   return <div class="local-el">
-    <div>Branch:</div>
     <div>
-      <For each={Object.entries(commits())}>
-        {([branch, commitid]) => <div>{branch}: {commitid}</div>}
+      <For each={Object.entries(relations())}>
+        {([branch, rel]) => <div>{branch}: {rel}</div>}
       </For>
     </div>
   </div>

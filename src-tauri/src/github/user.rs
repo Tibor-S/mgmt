@@ -61,7 +61,6 @@ pub async fn list_repos(token: &str, params: &ListParameters) -> Result<Vec<Repo
     if let Some(a) = &params.before {
         builder = builder.before(*a);
     }
-
     let page = builder.send().await?;
 
     let repos = page
@@ -80,6 +79,7 @@ pub async fn list_repos(token: &str, params: &ListParameters) -> Result<Vec<Repo
             let visibility = repo.visibility.clone();
             let created_at = repo.created_at;
             let updated_at = repo.updated_at;
+
             Repository {
                 id,
                 name,

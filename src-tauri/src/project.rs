@@ -258,7 +258,7 @@ pub fn match_remote_url(url_a: &str, url_b: &str) -> bool {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Project {
     local: Option<LocalProject>,
-    remote: Option<Repository>,
+    pub remote: Option<Repository>,
 }
 
 impl Project {
