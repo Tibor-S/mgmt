@@ -1,88 +1,48 @@
-use std::{collections::HashSet, fs, path::PathBuf};
+use std::{
+    collections::{HashMap, HashSet},
+    fs,
+    path::PathBuf,
+};
+
+use uuid::Uuid;
 
 use crate::github::user::{self, list_repos, ListParameters, Repository};
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct LocalProject {
-    pub path: PathBuf,
-    pub git: Option<GitInfo>,
+// ********** Projects **********
+
+#[derive(Debug, Clone, Default)]
+pub struct Projects {
+    projects: HashMap<Uuid, Project>,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct Project {
-    pub local: Option<LocalProject>,
-    pub remote: Option<Repository>,
-}
+impl Projects {
+    // pub fn new<T>(original: T) -> Self
+    // where
+    //     T: Iterator<Item = Project>,
+    // {
+    //     Self {
+    //         projects: original.map(|p| (Uuid::new_v4(), p)).collect(),
+    //     }
+    // }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct GitInfo {
-    pub changes: Vec<FileInfo>,
-    pub remotes: Vec<RemoteInfo>,
-}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct FileInfo {
-    pub path: Option<String>,
-    pub status: FileStatus,
-}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct RemoteInfo {
-    pub name: String,
-    pub url: String,
-    pub url_type: RemoteUrlType,
-}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub enum RemoteUrlType {
-    HTTP,
-    SSH,
-}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub enum FileStatus {
-    Current,
-    IndexNew,
-    IndexModified,
-    IndexDeleted,
-    IndexRenamed,
-    IndexTypeChange,
-    WorkTreeNew,
-    WorkTreeModified,
-    WorkTreeDeleted,
-    WorkTreeTypeChange,
-    WorkTreeRenamed,
-    Ignored,
-    Conflict,
-}
-
-impl From<git2::Status> for FileStatus {
-    fn from(status: git2::Status) -> Self {
-        match status {
-            git2::Status::CURRENT => FileStatus::Current,
-            git2::Status::INDEX_NEW => FileStatus::IndexNew,
-            git2::Status::INDEX_MODIFIED => FileStatus::IndexModified,
-            git2::Status::INDEX_DELETED => FileStatus::IndexDeleted,
-            git2::Status::INDEX_RENAMED => FileStatus::IndexRenamed,
-            git2::Status::INDEX_TYPECHANGE => FileStatus::IndexTypeChange,
-            git2::Status::WT_NEW => FileStatus::WorkTreeNew,
-            git2::Status::WT_MODIFIED => FileStatus::WorkTreeModified,
-            git2::Status::WT_DELETED => FileStatus::WorkTreeDeleted,
-            git2::Status::WT_TYPECHANGE => FileStatus::WorkTreeTypeChange,
-            git2::Status::WT_RENAMED => FileStatus::WorkTreeRenamed,
-            git2::Status::IGNORED => FileStatus::Ignored,
-            git2::Status::CONFLICTED => FileStatus::Conflict,
-            _ => unreachable!(),
-        }
+    pub fn get(&self, id: &Uuid) -> Option<&Project> {
+        self.projects.get(id)
     }
-}
 
-#[derive(Debug, thiserror::Error)]
-pub enum Error {
-    #[error(transparent)]
-    IoError(#[from] std::io::Error),
-    #[error(transparent)]
-    GithubError(#[from] user::Error),
+    pub fn clear(&mut self) -> () {
+        self.projects.clear()
+    }
+
+    pub fn extend<T>(&mut self, projects: T) -> ()
+    where
+        T: Iterator<Item = Project>,
+    {
+        self.projects.extend(projects.map(|p| (Uuid::new_v4(), p)))
+    }
+
+    pub fn ids(&self) -> Vec<Uuid> {
+        self.projects.keys().cloned().collect()
+    }
 }
 
 pub fn list_local_projects(path: &PathBuf) -> Result<Vec<LocalProject>, Error> {
@@ -151,7 +111,38 @@ pub fn list_local_projects(path: &PathBuf) -> Result<Vec<LocalProject>, Error> {
                 }
             };
 
-            let git = Some(GitInfo { changes, remotes });
+            let mut commits = HashMap::<String, String>::new();
+            let branches = match repository.branches(Some(git2::BranchType::Local)) {
+                Ok(bs) => bs,
+                Err(e) => {
+                    log::warn!("{:?}", e);
+                    return None;
+                }
+            };
+            let branch_names = match all_branch_names(branches) {
+                Ok(bs) => bs,
+                Err(e) => {
+                    log::warn!("{:?}", e);
+                    Vec::new()
+                }
+            };
+
+            for branch in branch_names {
+                let parsed = match repository.revparse_single(&branch) {
+                    Ok(r) => r,
+                    Err(e) => {
+                        log::warn!("{:?}", e);
+                        continue;
+                    }
+                };
+                commits.insert(branch, parsed.id().to_string());
+            }
+
+            let git = Some(GitInfo {
+                changes,
+                remotes,
+                branch_commit: commits,
+            });
 
             Some(LocalProject { path, git })
         })
@@ -260,4 +251,156 @@ pub fn match_remote_url(url_a: &str, url_b: &str) -> bool {
         b
     };
     a == b
+}
+
+// ********** Project **********
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct Project {
+    local: Option<LocalProject>,
+    remote: Option<Repository>,
+}
+
+impl Project {
+    pub fn local_name(&self) -> Option<String> {
+        let local = match self.local.clone() {
+            Some(l) => l,
+            None => return None,
+        };
+        let path = local.path;
+        let file_name = match path.file_name() {
+            Some(n) => n,
+            None => {
+                log::warn!(
+                    "Could not establish local name, make sure path does not terminate in .."
+                );
+                return None;
+            }
+        };
+        match file_name.to_str() {
+            Some(n) => Some(n.to_string()),
+            None => {
+                log::warn!("Could not establish local name from path, may not be valid unicode");
+                None
+            }
+        }
+    }
+
+    pub fn remote_name(&self) -> Option<String> {
+        let remote = match self.remote.clone() {
+            Some(r) => r,
+            None => return None,
+        };
+        let name = remote.name;
+        Some(name)
+    }
+
+    pub fn local_commits(&self) -> Option<HashMap<String, String>> {
+        let commits = self.local.clone()?.git?.branch_commit;
+        Some(commits)
+    }
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct LocalProject {
+    pub path: PathBuf,
+    pub git: Option<GitInfo>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct GitInfo {
+    pub changes: Vec<FileInfo>,
+    pub remotes: Vec<RemoteInfo>,
+    pub branch_commit: HashMap<String, String>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct FileInfo {
+    pub path: Option<String>,
+    pub status: FileStatus,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct RemoteInfo {
+    pub name: String,
+    pub url: String,
+    pub url_type: RemoteUrlType,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub enum RemoteUrlType {
+    HTTP,
+    SSH,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub enum FileStatus {
+    Current,
+    IndexNew,
+    IndexModified,
+    IndexDeleted,
+    IndexRenamed,
+    IndexTypeChange,
+    WorkTreeNew,
+    WorkTreeModified,
+    WorkTreeDeleted,
+    WorkTreeTypeChange,
+    WorkTreeRenamed,
+    Ignored,
+    Conflict,
+}
+
+impl From<git2::Status> for FileStatus {
+    fn from(status: git2::Status) -> Self {
+        match status {
+            git2::Status::CURRENT => FileStatus::Current,
+            git2::Status::INDEX_NEW => FileStatus::IndexNew,
+            git2::Status::INDEX_MODIFIED => FileStatus::IndexModified,
+            git2::Status::INDEX_DELETED => FileStatus::IndexDeleted,
+            git2::Status::INDEX_RENAMED => FileStatus::IndexRenamed,
+            git2::Status::INDEX_TYPECHANGE => FileStatus::IndexTypeChange,
+            git2::Status::WT_NEW => FileStatus::WorkTreeNew,
+            git2::Status::WT_MODIFIED => FileStatus::WorkTreeModified,
+            git2::Status::WT_DELETED => FileStatus::WorkTreeDeleted,
+            git2::Status::WT_TYPECHANGE => FileStatus::WorkTreeTypeChange,
+            git2::Status::WT_RENAMED => FileStatus::WorkTreeRenamed,
+            git2::Status::IGNORED => FileStatus::Ignored,
+            git2::Status::CONFLICTED => FileStatus::Conflict,
+            _ => unreachable!(),
+        }
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum Error {
+    #[error(transparent)]
+    IoError(#[from] std::io::Error),
+    #[error(transparent)]
+    GithubError(#[from] user::Error),
+    #[error(transparent)]
+    GitError(#[from] git2::Error),
+}
+
+// ********** Util functions **********
+
+pub fn all_branch_names(branches: git2::Branches) -> Result<Vec<String>, Error> {
+    let names = branches.filter_map(|b| {
+        let (branch, _) = match b {
+            Ok(b) => b,
+            Err(e) => {
+                log::warn!("{:?}", e);
+                return None;
+            }
+        };
+        let name = match branch.name() {
+            Ok(n) => n,
+            Err(e) => {
+                log::warn!("{:?}", e);
+                return None;
+            }
+        };
+
+        name.map(|n| n.to_string())
+    });
+    Ok(names.collect())
 }

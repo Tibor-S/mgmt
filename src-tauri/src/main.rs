@@ -7,7 +7,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use project::Project;
+use project::{Project, Projects};
 use tauri::async_runtime::block_on;
 use uuid::Uuid;
 
@@ -18,7 +18,7 @@ mod project;
 
 struct TokenState(Arc<Mutex<Option<String>>>);
 struct ProjectDirState(Arc<Mutex<Vec<PathBuf>>>);
-struct ProjectsState(Arc<Mutex<HashMap<Uuid, Project>>>);
+struct ProjectsState(Arc<Mutex<Projects>>);
 
 #[derive(Debug, thiserror::Error, serde::Serialize, serde::Deserialize)]
 pub enum Error {
@@ -79,17 +79,14 @@ fn update_projects(
     };
     let projects = &mut *projects_state.0.lock().unwrap();
     projects.clear();
-    for p in new_projects.iter() {
-        let key = Uuid::new_v4();
-        projects.insert(key, p.clone());
-    }
+    projects.extend(new_projects.into_iter());
     Ok(())
 }
 
 #[tauri::command]
 fn project_ids(projects_state: tauri::State<ProjectsState>) -> Result<Vec<Uuid>, Error> {
     let projects = &*projects_state.0.lock().unwrap();
-    Ok(projects.keys().cloned().collect())
+    Ok(projects.ids())
 }
 
 #[tauri::command]
@@ -106,9 +103,7 @@ fn project_remote_name(
         let projects = projects_state.0.lock().unwrap();
         prj = Some(projects.get(&key).ok_or(Error::UuidNoMatch)?.clone());
     }
-    let remote = prj.clone().and_then(|p| p.remote);
-    let remote_name = remote.map(|r| r.name);
-    Ok(remote_name)
+    Ok(prj.and_then(|p| p.remote_name()))
 }
 
 #[tauri::command]
@@ -125,18 +120,24 @@ fn project_local_name(
         let projects = projects_state.0.lock().unwrap();
         prj = Some(projects.get(&key).ok_or(Error::UuidNoMatch)?.clone());
     }
-    let local = match prj.clone().and_then(|p| p.local) {
-        Some(l) => l,
-        None => return Ok(None),
-    };
-    let path = local.path;
-    let file_name = path
-        .file_name()
-        .ok_or(Error::InvalidPathError)?
-        .to_str()
-        .ok_or(Error::PathParseError)?;
-    let name = file_name.to_string();
-    Ok(Some(name))
+    Ok(prj.and_then(|p| p.local_name()))
+}
+
+#[tauri::command]
+fn project_local_commits(
+    projects_state: tauri::State<ProjectsState>,
+    id: String,
+) -> Result<Option<HashMap<String, String>>, Error> {
+    let key = Uuid::try_parse(&id).map_err(|e| {
+        log::error!("{:?}", e);
+        Error::UuidParseError
+    })?;
+    let prj;
+    {
+        let projects = projects_state.0.lock().unwrap();
+        prj = Some(projects.get(&key).ok_or(Error::UuidNoMatch)?.clone());
+    }
+    Ok(prj.and_then(|p| p.local_commits()))
 }
 
 fn main() {
@@ -154,14 +155,15 @@ fn main() {
     tauri::Builder::default()
         .manage(TokenState(Arc::new(Mutex::new(token))))
         .manage(ProjectDirState(Arc::new(Mutex::new(vec![PathBuf::from(
-            r"C:\Users\Sebastian\Documents\Projects",
+            r"/Users/sebastian/Documents/prj/",
         )]))))
-        .manage(ProjectsState(Arc::new(Mutex::new(HashMap::new()))))
+        .manage(ProjectsState(Arc::new(Mutex::new(Projects::default()))))
         .invoke_handler(tauri::generate_handler![
             update_projects,
             project_ids,
             project_remote_name,
             project_local_name,
+            project_local_commits
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

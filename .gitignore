@@ -10,8 +10,11 @@ lerna-debug.log*
 node_modules
 dist
 dist-ssr
-*.local
+*.local*
 yarn.lock
+*/Cargo.lock
+src-tauri/target
+*.env
 
 # Editor directories and files
 .vscode/*
@@ -23,4 +26,3 @@ yarn.lock
 *.njsproj
 *.sln
 *.sw?
-run.local.bat
