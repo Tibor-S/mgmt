@@ -1,20 +1,51 @@
 .project-card {
-  width: 200px;
-  background-color: antiquewhite;
+  width: 230px;
+  margin: 10px;
+  padding: 10px;
+  background-color: white;
+  box-shadow: 5px 5px 10px 0px rgba(0,0,0,0.2);
 }
 
+.project-card .name-el {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  margin-bottom: 10px;
+}
 .project-card .name-el span {
-  font-size: 18px;
+  font-size: inherit;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 } 
-.project-card .name-el span:nth-child(1) {
+.project-card .name-el > span:nth-child(1) {
+  font-size: 16px;
   letter-spacing: 1px;
   color: #000;
-  margin-right: 3px;
+  margin-right: 5px;
+  max-width: 50%;
 } 
-.project-card .name-el span:nth-child(2) {
+.project-card .name-el > span:nth-child(2) {
   font-size: 14px;
-  color: rgb(179, 179, 179)
+  color: rgb(141, 141, 141);
+  flex: 1;
 } 
+.has-changes {
+  --size: 8px;
+  height: var(--size);
+  width: calc(3 * var(--size));
+  border-radius: var(--size);
+  border-width: 2px;
+  border-color: gainsboro;
+  display: inline-block;
+  flex:none;
+}
+.has-changes.no {
+  background-color: rgb(97, 162, 97);
+}
+.has-changes.yes {
+  background-color: rgb(247, 203, 42);
+}
 
 .project-card .local-el  {
   display: flex;

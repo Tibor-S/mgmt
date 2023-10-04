@@ -54,7 +54,30 @@ const RemoteEl = (props: {
       </For>
     </div>
   </div>
-}  
+}
+
+const NumChangesEl = (props: {
+  id: string,
+}) => {
+
+  const {id} = props;
+  const [numChanges, setNumChanges] = createSignal<number>();
+  const [status, setStatus] = createSignal<"unknown" | "no" | "yes">("unknown");
+  onMount(() => {
+    invoke<number>("project_changes", {id: id})
+      .then((res) => setNumChanges(res))
+      .catch((err) => console.log(err));
+  })
+
+  createEffect(() => {
+    const n = numChanges();
+    if (n === undefined) setStatus("unknown");
+    else if (n === 0) setStatus("no");
+    else setStatus("yes");
+  }, [numChanges])
+
+  return <div class={`has-changes ${status()}`}></div>
+}
 
 const NameEl = (props: {
   id: string,
@@ -77,8 +100,9 @@ const NameEl = (props: {
     <Show when={remoteName()}>
       <span>{remoteName()}</span>
     </Show>
-    <Show when={localName() && (localName() !== remoteName())}>
-      <span>{localName()}</span>
+    <Show when={localName()}>
+        <span>{localName()}</span>
+        <NumChangesEl id={id} />
     </Show>
     <Show when={!localName() && !remoteName()}>
       <span>Unknown</span>

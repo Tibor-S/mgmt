@@ -39,6 +39,8 @@ pub enum Error {
     InvalidPathError,
     #[error("Error occured while listing remote commits")]
     RemoteCommitsError,
+    #[error("Error occured while getting changes")]
+    ChangesError,
 }
 
 #[tauri::command]
@@ -192,6 +194,30 @@ fn branch_relation(
     Ok(task)
 }
 
+#[tauri::command]
+fn project_changes(
+    projects_state: tauri::State<ProjectsState>,
+    id: String,
+) -> Result<usize, Error> {
+    let key = Uuid::try_parse(&id).map_err(|e| {
+        log::error!("{:?}", e);
+        Error::UuidParseError
+    })?;
+    let prj;
+    {
+        let projects = projects_state.0.lock().unwrap();
+        prj = projects.get(&key).ok_or(Error::UuidNoMatch)?.clone();
+    }
+    let c = prj.number_of_changes();
+    match c {
+        Ok(c) => Ok(c),
+        Err(e) => {
+            log::error!("{}", e);
+            Err(Error::ChangesError)
+        }
+    }
+}
+
 fn main() {
     env_logger::init();
     dotenv::dotenv().ok();
@@ -217,6 +243,7 @@ fn main() {
             project_local_name,
             project_local_commits,
             branch_relation,
+            project_changes
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -299,6 +299,25 @@ impl Project {
         let commits = self.local.clone()?.git?.branch_commit;
         Some(commits)
     }
+
+    pub fn number_of_changes(&self) -> Result<usize, Error> {
+        let changes = self.get_git()?.changes;
+        Ok(changes.len())
+    }
+
+    fn get_local(&self) -> Result<LocalProject, Error> {
+        match self.local.clone() {
+            Some(l) => Ok(l),
+            None => Err(Error::NoLocalProject),
+        }
+    }
+
+    fn get_git(&self) -> Result<GitInfo, Error> {
+        match self.get_local()?.git {
+            Some(l) => Ok(l),
+            None => Err(Error::NoGit),
+        }
+    }
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -379,6 +398,10 @@ pub enum Error {
     GithubError(#[from] user::Error),
     #[error(transparent)]
     GitError(#[from] git2::Error),
+    #[error("No local project exists")]
+    NoLocalProject,
+    #[error("Git is not used for this project")]
+    NoGit,
 }
 
 // ********** Util functions **********
